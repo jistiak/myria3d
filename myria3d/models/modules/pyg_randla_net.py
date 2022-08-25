@@ -84,7 +84,6 @@ class LocalFeatureAggregation(MessagePassing):
     """Positional encoding of points in a neighborhood."""
 
     def __init__(self, d_out):
-        # TODO: check if need for batch, activation, etc.
         super().__init__(aggr="add")
         self.mlp_encoder = MLP([10, d_out // 2])
         self.mlp_attention = MLP([d_out, d_out])
@@ -111,7 +110,7 @@ class LocalFeatureAggregation(MessagePassing):
         local_spatial_encoding = self.mlp_encoder(relative_infos)  # N//4 * K, d
         out1 = torch.cat([x_j, local_spatial_encoding], dim=1)  # N//4 * K, 2d
 
-        # attention will weight the differetn features of x
+        # attention will weight the different features of x
         attention_scores = torch.softmax(
             self.mlp_attention(out1), dim=-1
         )  # N//4 * K, d_out
