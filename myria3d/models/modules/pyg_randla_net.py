@@ -30,7 +30,7 @@ class PyGRandLANet(torch.nn.Module):
         self.num_workers = num_workers
 
         self.lfa1_module = DilatedResidualBlock(
-            decimation, num_neighbors, num_features - 3, 32
+            decimation, num_neighbors, num_features, 32
         )
         self.lfa2_module = DilatedResidualBlock(decimation, num_neighbors, 32, 128)
         self.lfa3_module = DilatedResidualBlock(decimation, num_neighbors, 128, 256)
@@ -39,13 +39,14 @@ class PyGRandLANet(torch.nn.Module):
         self.fp4_module = FPModule(1, MLP([512 + 256, 256]))
         self.fp3_module = FPModule(1, MLP([256 + 128, 128]))
         self.fp2_module = FPModule(1, MLP([128 + 32, 32]))
-        self.fp1_module = FPModule(1, MLP([32 + num_features - 3, 8]))
+        self.fp1_module = FPModule(1, MLP([32 + num_features, 8]))
 
         self.mlp2 = MLP([8, 64, 32], dropout=0.5)
         self.lin = torch.nn.Linear(32, num_classes)
 
     def forward(self, batch):
-        in_0 = (batch.x, batch.pos, batch.batch)
+        x_with_pos = torch.cat([batch.pos, batch.x], axis=1)
+        in_0 = (x_with_pos, batch.pos, batch.batch)
 
         lfa1_out = self.lfa1_module(*in_0)
         lfa2_out = self.lfa2_module(*lfa1_out)
