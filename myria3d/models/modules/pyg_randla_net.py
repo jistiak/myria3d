@@ -14,6 +14,7 @@ from torch_geometric.nn.pool import knn
 from torch_geometric.datasets import ShapeNet
 
 lrelu02 = LeakyReLU(negative_slope=0.2)
+bn099 = BatchNorm(16, momentum=0.99, eps=1e-6)
 
 
 class PyGRandLANet(torch.nn.Module):
@@ -33,19 +34,21 @@ class PyGRandLANet(torch.nn.Module):
         # 16 instead of 8 to avoid having lower dim than num_features.
         self.fc0 = Sequential(
             torch.nn.Linear(in_features=num_features, out_features=16),
-            BatchNorm(16, momentum=0.99, eps=1e-6),
+            bn099,
         )
         self.lfa1_module = DilatedResidualBlock(decimation, num_neighbors, 16, 16)
         self.lfa2_module = DilatedResidualBlock(decimation, num_neighbors, 32, 64)
         self.lfa3_module = DilatedResidualBlock(decimation, num_neighbors, 128, 128)
         self.lfa4_module = DilatedResidualBlock(decimation, num_neighbors, 256, 256)
         self.mlp1 = MLP([512, 512], act=lrelu02)
-        self.fp4_module = FPModule(1, MLP([512 + 256, 256], act=lrelu02))
-        self.fp3_module = FPModule(1, MLP([256 + 256, 128], act=lrelu02))
-        self.fp2_module = FPModule(1, MLP([128 + 128, 32], act=lrelu02))
-        self.fp1_module = FPModule(1, MLP([32 + num_features, 8], act=lrelu02))
+        self.fp4_module = FPModule(1, MLP([512 + 256, 256], act=lrelu02, norm=bn099))
+        self.fp3_module = FPModule(1, MLP([256 + 128, 128], act=lrelu02, norm=bn099))
+        self.fp2_module = FPModule(1, MLP([128 + 32, 32], act=lrelu02, norm=bn099))
+        self.fp1_module = FPModule(1, MLP([32 + 16, 8], act=lrelu02, norm=bn099))
 
-        self.mlp2 = MLP([8, 64, 32], dropout=0.5)  # leaky relu ?
+        self.mlp2 = MLP(
+            [8, 64, 32], dropout=0.5, act=lrelu02, norm=bn099
+        )  # leaky relu ?
         self.lin = torch.nn.Linear(32, num_classes)
 
     def forward(self, batch):
@@ -133,11 +136,11 @@ class DilatedResidualBlock(MessagePassing):
         self.d_out = d_out
 
         # MLP on input
-        self.mlp1 = MLP([d_in, d_out // 4], norm=False, act=lrelu02)
-        # MLP on input whose result is summed with the output of mlp2
-        self.shortcut = MLP([d_in, 2 * d_out], act=lrelu02)
+        self.mlp1 = MLP([d_in, d_out // 4], act=lrelu02, norm=False)
+        # MLP on input, and the result is summed with the output of mlp2
+        self.shortcut = MLP([d_in, 2 * d_out], act=None, norm=bn099)
         # MLP on output
-        self.mlp2 = MLP([d_out, 2 * d_out], norm=False, act=lrelu02)
+        self.mlp2 = MLP([d_out, 2 * d_out], act=None, norm=bn099)
 
         self.lfa1 = LocalFeatureAggregation(d_out // 2)
         self.lfa2 = LocalFeatureAggregation(d_out)
