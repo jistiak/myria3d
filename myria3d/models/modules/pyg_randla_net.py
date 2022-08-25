@@ -87,9 +87,11 @@ class LocalFeatureAggregation(MessagePassing):
         super().__init__(aggr="add")
         self.mlp_encoder = MLP([10, d_out // 2])
         self.mlp_attention = MLP([d_out, d_out])
+        self.mlp_post_attention = MLP([d_out, d_out])
 
     def forward(self, edge_indx, x, pos):
         out = self.propagate(edge_indx, x=x, pos=pos)  # N // 4 * d_out
+        out = self.mlp_post_attention(out)
         return out
 
     def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor) -> Tensor:
@@ -108,14 +110,13 @@ class LocalFeatureAggregation(MessagePassing):
             [pos_i, pos_j, dist, euclidian_dist], dim=1
         )  # N//4 * K, d
         local_spatial_encoding = self.mlp_encoder(relative_infos)  # N//4 * K, d
-        out1 = torch.cat([x_j, local_spatial_encoding], dim=1)  # N//4 * K, 2d
+        local_features = torch.cat([x_j, local_spatial_encoding], dim=1)  # N//4 * K, 2d
 
         # attention will weight the different features of x
         attention_scores = torch.softmax(
-            self.mlp_attention(out1), dim=-1
+            self.mlp_attention(local_features), dim=-1
         )  # N//4 * K, d_out
-        out2 = attention_scores * out1  # N//4 * K, d_out
-        return out2
+        return attention_scores * local_features  # N//4 * K, d_out
 
 
 class DilatedResidualBlock(MessagePassing):
