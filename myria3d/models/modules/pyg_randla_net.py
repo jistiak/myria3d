@@ -8,10 +8,12 @@ import torch_geometric.transforms as T
 from torchmetrics.functional import jaccard_index
 from torch_scatter import scatter
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import MLP, global_max_pool, knn_interpolate
+from torch_geometric.nn import MLP, global_max_pool, knn_interpolate, BatchNorm
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.pool import knn
 from torch_geometric.datasets import ShapeNet
+
+lrelu02 = LeakyReLU(negative_slope=0.2)
 
 
 class PyGRandLANet(torch.nn.Module):
@@ -28,25 +30,28 @@ class PyGRandLANet(torch.nn.Module):
         super().__init__()
         self.interpolation_k = interpolation_k
         self.num_workers = num_workers
-
-        self.lfa1_module = DilatedResidualBlock(
-            decimation, num_neighbors, num_features, 32
+        # 16 instead of 8 to avoid having lower dim than num_features.
+        self.fc0 = Sequential(
+            torch.nn.Linear(in_features=num_features, out_features=16),
+            BatchNorm(16, momentum=0.99, eps=1e-6),
         )
-        self.lfa2_module = DilatedResidualBlock(decimation, num_neighbors, 32, 128)
-        self.lfa3_module = DilatedResidualBlock(decimation, num_neighbors, 128, 256)
-        self.lfa4_module = DilatedResidualBlock(decimation, num_neighbors, 256, 512)
-        self.mlp1 = MLP([512, 512])
-        self.fp4_module = FPModule(1, MLP([512 + 256, 256]))
-        self.fp3_module = FPModule(1, MLP([256 + 128, 128]))
-        self.fp2_module = FPModule(1, MLP([128 + 32, 32]))
-        self.fp1_module = FPModule(1, MLP([32 + num_features, 8]))
+        self.lfa1_module = DilatedResidualBlock(decimation, num_neighbors, 16, 16)
+        self.lfa2_module = DilatedResidualBlock(decimation, num_neighbors, 32, 64)
+        self.lfa3_module = DilatedResidualBlock(decimation, num_neighbors, 128, 128)
+        self.lfa4_module = DilatedResidualBlock(decimation, num_neighbors, 256, 256)
+        self.mlp1 = MLP([512, 512], act=lrelu02)
+        self.fp4_module = FPModule(1, MLP([512 + 256, 256], act=lrelu02))
+        self.fp3_module = FPModule(1, MLP([256 + 256, 128], act=lrelu02))
+        self.fp2_module = FPModule(1, MLP([128 + 128, 32], act=lrelu02))
+        self.fp1_module = FPModule(1, MLP([32 + num_features, 8], act=lrelu02))
 
-        self.mlp2 = MLP([8, 64, 32], dropout=0.5)
+        self.mlp2 = MLP([8, 64, 32], dropout=0.5)  # leaky relu ?
         self.lin = torch.nn.Linear(32, num_classes)
 
     def forward(self, batch):
         x_with_pos = torch.cat([batch.pos, batch.x], axis=1)
-        in_0 = (x_with_pos, batch.pos, batch.batch)
+
+        in_0 = (self.fc0(x_with_pos), batch.pos, batch.batch)
 
         lfa1_out = self.lfa1_module(*in_0)
         lfa2_out = self.lfa2_module(*lfa1_out)
@@ -85,9 +90,9 @@ class LocalFeatureAggregation(MessagePassing):
 
     def __init__(self, d_out):
         super().__init__(aggr="add")
-        self.mlp_encoder = MLP([10, d_out // 2])
-        self.mlp_attention = MLP([d_out, d_out])
-        self.mlp_post_attention = MLP([d_out, d_out])
+        self.mlp_encoder = MLP([10, d_out // 2], act=lrelu02)
+        self.mlp_attention = MLP([d_out, d_out], act=None)
+        self.mlp_post_attention = MLP([d_out, d_out], act=lrelu02)
 
     def forward(self, edge_indx, x, pos):
         out = self.propagate(edge_indx, x=x, pos=pos)  # N // 4 * d_out
@@ -128,28 +133,11 @@ class DilatedResidualBlock(MessagePassing):
         self.d_out = d_out
 
         # MLP on input
-        self.mlp1 = Sequential(
-            MLP(
-                [d_in, d_out // 4],
-                norm=False,
-            ),
-            LeakyReLU(negative_slope=0.2),
-        )
+        self.mlp1 = MLP([d_in, d_out // 4], norm=False, act=lrelu02)
         # MLP on input whose result is summed with the output of mlp2
-        self.shortcut = Sequential(
-            MLP(
-                [d_in, d_out],
-            ),
-            LeakyReLU(negative_slope=0.2),
-        )
+        self.shortcut = MLP([d_in, 2 * d_out], act=lrelu02)
         # MLP on output
-        self.mlp2 = Sequential(
-            MLP(
-                [d_out, d_out],
-                norm=False,
-            ),
-            LeakyReLU(negative_slope=0.2),
-        )
+        self.mlp2 = MLP([d_out, 2 * d_out], norm=False, act=lrelu02)
 
         self.lfa1 = LocalFeatureAggregation(d_out // 2)
         self.lfa2 = LocalFeatureAggregation(d_out)
