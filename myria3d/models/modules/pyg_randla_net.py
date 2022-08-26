@@ -13,10 +13,6 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.pool import knn
 from torch_geometric.datasets import ShapeNet
 
-lrelu02 = LeakyReLU(negative_slope=0.2)
-
-bn099 = lambda in_channels: BatchNorm(in_channels, momentum=0.99, eps=1e-6)
-
 
 class PyGRandLANet(torch.nn.Module):
     # num_features = total including pos, which should be removed.. TODO: make this simpler.
@@ -81,6 +77,14 @@ class PyGRandLANet(torch.nn.Module):
         scores = self.fc_end(x)
 
         return scores
+
+
+# Default activation and BatchNorm used by RandLaNet authors
+lrelu02 = LeakyReLU(negative_slope=0.2)
+
+
+def bn099(in_channels):
+    return BatchNorm(in_channels, momentum=0.99, eps=1e-6)
 
 
 class GlobalPooling(torch.nn.Module):
