@@ -1,3 +1,4 @@
+from typing import List, Union
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -20,22 +21,36 @@ class PyGRandLANet(torch.nn.Module):
         self,
         num_features,
         num_classes,
-        decimation: int = 4,
-        num_neighbors: int = 16,
+        decimation: Union[List[int], int] = 4,
+        num_neighbors: Union[List[int], int] = 16,
         interpolation_k: int = 25,
         num_workers: int = 1,
     ):
         super().__init__()
+
         self.interpolation_k = interpolation_k
         self.num_workers = num_workers
+
+        # aliases and extends as list if needed
+        d = decimation
+        nk = num_neighbors
+        if isinstance(d, int):
+            d = 4 * [d]
+        if isinstance(nk, int):
+            nk = 4 * [nk]
+
         # 16 instead of 8 to avoid having lower dim than num_features.
         self.fc0 = Sequential(
             Linear(in_features=num_features, out_features=16), bn099(16)
         )
-        self.lfa1_module = DilatedResidualBlock(decimation, num_neighbors, 16, 16)
-        self.lfa2_module = DilatedResidualBlock(decimation, num_neighbors, 32, 64)
-        self.lfa3_module = DilatedResidualBlock(decimation, num_neighbors, 128, 128)
-        self.lfa4_module = DilatedResidualBlock(decimation, num_neighbors, 256, 256)
+        self.lfa1_module = DilatedResidualBlock(d[0], nk[0], 16, 16)
+        self.lfa2_module = DilatedResidualBlock(d[1], nk[1], 32, 64)
+        self.lfa3_module = DilatedResidualBlock(
+            d[2], nk[2], 128, 128
+        )
+        self.lfa4_module = DilatedResidualBlock(
+            d[3], nk[3], 256, 256
+        )
         self.mlp1 = MLP([512, 512], act=lrelu02)
         self.fp4_module = FPModule(
             1, MLP([512 + 256, 256], act=lrelu02, norm=bn099(256))
