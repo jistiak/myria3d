@@ -16,7 +16,6 @@ from torch_geometric.datasets import ShapeNet
 
 
 class PyGRandLANet(torch.nn.Module):
-    # num_features = total including pos, which should be removed.. TODO: make this simpler.
     def __init__(
         self,
         num_features,
@@ -42,7 +41,13 @@ class PyGRandLANet(torch.nn.Module):
         self.lfa2_module = DilatedResidualBlock(d[1], nk[1], 32, 64)
         self.lfa3_module = DilatedResidualBlock(d[2], nk[2], 128, 128)
         self.lfa4_module = DilatedResidualBlock(d[3], nk[3], 256, 256)
-        self.mlp1 = MLP([512, 512], act=lrelu02)
+        self.global_pool_stack = GlobalPoolingStacking(
+            MLP([512, 512], act=lrelu02, norm=None)
+        )
+
+        self.fp5_module = FPModule(
+            1, MLP([512 + 512, 512], act=lrelu02, norm=bn099(512))
+        )
         self.fp4_module = FPModule(
             1, MLP([512 + 256, 256], act=lrelu02, norm=bn099(256))
         )
@@ -68,9 +73,10 @@ class PyGRandLANet(torch.nn.Module):
         lfa3_out = self.lfa3_module(*lfa2_out)
         lfa4_out = self.lfa4_module(*lfa3_out)
 
-        mlp_out = (self.mlp1(lfa4_out[0]), lfa4_out[1], lfa4_out[2])
+        pool_stack_out = self.global_pool_stack(*lfa4_out)
+        fp5_out = self.fp5_module(*pool_stack_out, *lfa4_out)
 
-        fp4_out = self.fp4_module(*mlp_out, *lfa3_out)
+        fp4_out = self.fp4_module(*fp5_out, *lfa3_out)
         fp3_out = self.fp3_module(*fp4_out, *lfa2_out)
         fp2_out = self.fp2_module(*fp3_out, *lfa1_out)
         x, _, _ = self.fp1_module(*fp2_out, *in_0)
@@ -90,7 +96,7 @@ def bn099(in_channels):
     return BatchNorm(in_channels, momentum=0.99, eps=1e-6)
 
 
-class GlobalPooling(torch.nn.Module):
+class GlobalPoolingStacking(torch.nn.Module):
     def __init__(self, nn):
         super().__init__()
         self.nn = nn
@@ -227,7 +233,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = PyGRandLANet(3 + 3, train_dataset.num_classes).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     def train():
         model.train()
