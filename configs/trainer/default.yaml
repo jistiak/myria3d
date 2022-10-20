@@ -5,7 +5,7 @@ gpus: 0
 
 min_epochs: 1
 max_epochs: 1300
-log_every_n_steps: 1
+log_every_n_steps: 5
 
 weights_summary: null
 progress_bar_refresh_rate: 1
