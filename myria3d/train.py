@@ -72,7 +72,9 @@ def train(config: DictConfig) -> Trainer:
 
     # Init lightning datamodule
     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(config.datamodule)
+    datamodule: LightningDataModule = hydra.utils.instantiate(
+        config.datamodule
+    )
 
     log.info(f"Instantiating model <{config.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(config.model)
@@ -144,22 +146,33 @@ def train(config: DictConfig) -> Trainer:
 
         log.info("Starting training and validating!")
         trainer.fit(
-            model=model, datamodule=datamodule, ckpt_path=config.model.ckpt_path
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=config.model.ckpt_path,
         )
-        log.info(f"Best checkpoint:\n{trainer.checkpoint_callback.best_model_path}")
+        log.info(
+            f"Best checkpoint:\n{trainer.checkpoint_callback.best_model_path}"
+        )
         log.info("End of training and validating!")
-    if "test" in task_name or "fit" in task_name:
+
+        # Next: evaluate on test set.
+        task_name = "test"
+    if "test" in task_name:
         log.info("Starting testing!")
         if trainer.checkpoint_callback.best_model_path:
             log.info(
                 f"Test will use just-trained best model checkpointed at \n {trainer.checkpoint_callback.best_model_path}"
             )
-            config.model.ckpt_path = trainer.checkpoint_callback.best_model_path
+            config.model.ckpt_path = (
+                trainer.checkpoint_callback.best_model_path
+            )
         log.info(
             f"Test will use specified model checkpointed at \n {config.model.ckpt_path}"
         )
         trainer.test(
-            model=model, datamodule=datamodule, ckpt_path=config.model.ckpt_path
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=config.model.ckpt_path,
         )
         log.info("End of testing!")
 
@@ -168,10 +181,16 @@ def train(config: DictConfig) -> Trainer:
         # Instantiates the Model but overwrites everything with current config,
         # except module related params (nnet architecture)
         kwargs_to_override = copy.deepcopy(model.hparams)
-        kwargs_to_override.pop(NEURAL_NET_ARCHITECTURE_CONFIG_GROUP, None)  # removes that key if it's there
-        model = Model.load_from_checkpoint(config.model.ckpt_path, **kwargs_to_override)
+        kwargs_to_override.pop(
+            NEURAL_NET_ARCHITECTURE_CONFIG_GROUP, None
+        )  # removes that key if it's there
+        model = Model.load_from_checkpoint(
+            config.model.ckpt_path, **kwargs_to_override
+        )
         trainer.fit(model=model, datamodule=datamodule, ckpt_path=None)
-        log.info(f"Best checkpoint:\n{trainer.checkpoint_callback.best_model_path}")
+        log.info(
+            f"Best checkpoint:\n{trainer.checkpoint_callback.best_model_path}"
+        )
         log.info("End of training and validating!")
 
     # Returns the trainer for access to everything that was calculated.
