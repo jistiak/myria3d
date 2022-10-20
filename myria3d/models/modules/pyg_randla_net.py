@@ -46,7 +46,9 @@ class PyGRandLANet(torch.nn.Module):
         self.block2 = DilatedResidualBlock(num_neighbors, 32, 128)
         self.block3 = DilatedResidualBlock(num_neighbors, 128, 256)
         self.block4 = DilatedResidualBlock(num_neighbors, 256, 512)
-        self.mlp_summit = SharedMLP([512, 512])
+        self.block5 = DilatedResidualBlock(num_neighbors, 512, 1024)
+        self.mlp_summit = SharedMLP([1024, 1024])
+        self.fp5 = FPModule(1, SharedMLP([1024 + 512, 512]))
         self.fp4 = FPModule(1, SharedMLP([512 + 256, 256]))
         self.fp3 = FPModule(1, SharedMLP([256 + 128, 128]))
         self.fp2 = FPModule(1, SharedMLP([128 + 32, 32]))
@@ -69,15 +71,19 @@ class PyGRandLANet(torch.nn.Module):
         b3_out_decimated, ptr3 = decimate(b3_out, ptr2, self.decimation)
 
         b4_out = self.block4(*b3_out_decimated)
-        b4_out_decimated, _ = decimate(b4_out, ptr3, self.decimation)
+        b4_out_decimated, ptr4 = decimate(b4_out, ptr3, self.decimation)
+
+        b5_out = self.block5(*b4_out_decimated)
+        b5_out_decimated, _ = decimate(b5_out, ptr4, self.decimation)
 
         mlp_out = (
-            self.mlp_summit(b4_out_decimated[0]),
-            b4_out_decimated[1],
-            b4_out_decimated[2],
+            self.mlp_summit(b5_out_decimated[0]),
+            b5_out_decimated[1],
+            b5_out_decimated[2],
         )
 
-        fp4_out = self.fp4(*mlp_out, *b3_out_decimated)
+        fp5_out = self.fp5(*mlp_out, *b4_out_decimated)
+        fp4_out = self.fp4(*fp5_out, *b3_out_decimated)
         fp3_out = self.fp3(*fp4_out, *b2_out_decimated)
         fp2_out = self.fp2(*fp3_out, *b1_out_decimated)
         fp1_out = self.fp1(*fp2_out, *b1_out)
